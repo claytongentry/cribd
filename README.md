@@ -7,7 +7,7 @@
 
 ## Status
 
-The current prototype runs on an Apple silicon Mac, serves one stream through MediaMTX's built-in viewer, and is loopback-only by default. It can also serve devices on the same local network. Custom viewers, event adapters, remote access, persistence, and Raspberry Pi deployment come later.
+The current prototype runs on an Apple silicon Mac and serves one stream through a status-aware WebRTC viewer. It is loopback-only by default and can also serve devices on the same local network. Event adapters, remote access, persistence, and Raspberry Pi deployment come later.
 
 ## Run locally
 
@@ -19,7 +19,7 @@ cp .env.example .env
 ./bin/cribd
 ```
 
-Open `http://localhost:8889/crib`. Use H.264 video with Opus, G722, PCMA, or PCMU audio for WebRTC playback.
+Open `http://localhost:8889/crib`. The viewer reports when the camera is connecting, live, or offline, and reconnects after interruptions or frozen video. Use H.264 video with Opus, G722, PCMA, or PCMU audio for WebRTC playback.
 
 To view from another device, use the Mac's LAN IPv4 address—not the camera's:
 
@@ -29,7 +29,7 @@ CRIBD_HOST=192.168.1.10 ./bin/cribd
 
 Then open `http://192.168.1.10:8889/crib` from a device on the same network.
 
-The launcher runs MediaMTX 1.20.0 and binds its WebRTC ports to the selected address. Docker and Docker Compose are not required; `docker.io` is only the OCI image registry.
+The launcher runs MediaMTX 1.20.0 and a BusyBox 1.37.0 static viewer, with both services bound to the selected address. Docker and Docker Compose are not required; `docker.io` is only the OCI image registry.
 
 ## Architecture
 
@@ -67,11 +67,9 @@ The core does not know how Reolink or another vendor delivers events. Without an
 
 ## Roadmap
 
-1. Prove RTSP to MediaMTX to browser WebRTC on a Mac.
-2. Add the viewer, health reporting, and explicit offline states.
-3. Test a dedicated camera, night vision, audio, and restart recovery.
-4. Move the stack to a Raspberry Pi and add automatic startup.
-5. Add Tailscale, define the event interface, and build a Reolink adapter.
+1. Test a dedicated camera, night vision, audio, and restart recovery.
+2. Move the stack to a Raspberry Pi and add automatic startup.
+3. Add Tailscale, define the event interface, and build a Reolink adapter.
 
 ## License
 

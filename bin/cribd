@@ -13,6 +13,10 @@ command -v container >/dev/null 2>&1 ||
 
 project_dir=$(CDPATH= cd -- "${0%/*}/.." && pwd)
 host=${CRIBD_HOST:-127.0.0.1}
+media_name=cribd-media
+viewer_name=cribd-viewer
+started=
+log_pid=
 
 if [ "${CRIBD_RTSP_URL+x}" != x ] && [ -f "$project_dir/.env" ]; then
   . "$project_dir/.env"
@@ -28,9 +32,61 @@ unset CRIBD_RTSP_URL CRIBD_HOST
 
 container system start
 
-exec container run --rm --name cribd-media \
+for name in "$media_name" "$viewer_name"; do
+  if container inspect "$name" >/dev/null 2>&1; then
+    error "container '$name' already exists. Stop or remove it manually."
+  fi
+done
+
+cleanup() {
+  status=$?
+  trap - 0 1 2 15
+
+  if [ -n "$log_pid" ]; then
+    kill "$log_pid" >/dev/null 2>&1 || true
+  fi
+  for name in $started; do
+    container stop "$name" >/dev/null 2>&1 || true
+  done
+  if [ -n "$log_pid" ]; then
+    wait "$log_pid" 2>/dev/null || true
+  fi
+
+  exit "$status"
+}
+
+container_running() {
+  container inspect "$1" 2>/dev/null |
+    grep -Eq '"state"[[:space:]]*:[[:space:]]*"running"'
+}
+
+trap cleanup 0
+trap 'exit 129' 1
+trap 'exit 130' 2
+trap 'exit 143' 15
+
+container run --detach --rm --name "$media_name" \
   --env "MTX_PATHS_CRIB_SOURCE=$rtsp_url" \
   --env "MTX_WEBRTCADDITIONALHOSTS=$host" \
-  --publish "$host:8889:8889/tcp" \
+  --publish "$host:8890:8889/tcp" \
   --publish "$host:8189:8189/udp" \
-  docker.io/bluenviron/mediamtx:1.20.0
+  docker.io/bluenviron/mediamtx:1.20.0 >/dev/null
+started=$media_name
+
+container run --detach --rm --read-only --name "$viewer_name" \
+  --mount "type=bind,source=$project_dir/web,target=/www,readonly" \
+  --publish "$host:8889:8080/tcp" \
+  docker.io/library/busybox:1.37.0 \
+  httpd -f -p 8080 -h /www >/dev/null
+started="$viewer_name $started"
+
+container logs --follow "$media_name" &
+log_pid=$!
+
+while :; do
+  for name in "$media_name" "$viewer_name"; do
+    container_running "$name" ||
+      error "${name#cribd-} container stopped unexpectedly."
+  done
+  sleep 1
+done

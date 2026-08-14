@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101617" />
+    <title>cribd</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body data-state="connecting">
+    <main class="monitor">
+      <video
+        id="video"
+        aria-label="Crib camera live stream"
+        autoplay
+        muted
+        playsinline
+      ></video>
+
+      <div class="status" role="status" aria-live="polite" aria-atomic="true">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="status-label">Connecting</span>
+      </div>
+
+      <section class="empty-state" aria-hidden="true">
+        <p class="eyebrow">Crib camera</p>
+        <h1 id="state-title">Connecting</h1>
+        <p class="detail" id="state-detail">Waiting for the camera stream</p>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
