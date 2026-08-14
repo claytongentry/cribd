@@ -1,174 +1,69 @@
 # cribd
 
-`cribd` is a local, private baby-monitor server. Its core job is to take video and audio from an RTSP camera and make the stream available to an iPad or phone through browser-friendly WebRTC.
-
-[MediaMTX](https://github.com/bluenviron/mediamtx) provides the media-routing layer. Optional hardware adapters can add camera-specific events without putting vendor logic into the core server.
+`cribd` turns one RTSP camera stream into browser-friendly WebRTC for a local, private baby monitor. [MediaMTX](https://github.com/bluenviron/mediamtx) handles the media path; optional hardware adapters can provide camera-specific events without putting vendor logic in the server.
 
 > [!WARNING]
-> This project is a convenience monitor, not a medical device or a substitute for safe-sleep practices, direct supervision, or any medically indicated monitor. It does not provide breathing, heart-rate, or infant-safety monitoring.
+> This project is not a medical device or a substitute for safe-sleep practices, direct supervision, or any medically indicated monitor.
 
 ## Status
 
-This project is in the design and prototyping stage. The first target is an Apple-silicon Mac with an iPhone acting as an RTSP camera. The production target is the same ARM64 container stack on a Raspberry Pi 5 with a dedicated IP camera.
+The current prototype runs on an Apple silicon Mac, serves one loopback-only stream, and uses MediaMTX's built-in viewer. Custom viewers, event adapters, remote access, persistence, and Raspberry Pi deployment come later.
+
+## Run locally
+
+Requires macOS 26 on Apple silicon, Apple's [`container`](https://github.com/apple/container) CLI 1.0 or later, and an RTSP camera.
+
+```sh
+cp .env.example .env
+# Set CRIBD_RTSP_URL in .env.
+./bin/cribd
+```
+
+Open `http://localhost:8889/crib`. Use H.264 video with Opus, G722, PCMA, or PCMU audio for WebRTC playback.
+
+The launcher runs MediaMTX 1.20.0 and binds its WebRTC ports to loopback. Docker and Docker Compose are not required; `docker.io` is only the OCI image registry.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Camera["IP camera"]
-
-    subgraph Server["cribd on the home server"]
-        Media["MediaMTX"]
-        Core["cribd core"]
-        Adapter["Optional hardware adapter"]
-    end
-
-    Viewer["Local viewer<br/>iPad or iPhone"]
-    Remote["Remote viewer<br/>over Tailscale"]
-
-    Camera -->|"RTSP video/audio"| Media
-    Media -->|"WebRTC"| Viewer
-    Media -->|"WebRTC"| Remote
-    Core -->|"Viewer and status"| Viewer
-    Core -->|"Viewer and status"| Remote
-
-    Camera -.->|"Vendor event API"| Adapter
-    Adapter -.->|"Generic events"| Core
-    Core -.->|"Optional event stream"| Viewer
-    Core -.->|"Optional event stream"| Remote
-```
-
-The required path is:
-
 ```text
 camera -> RTSP -> cribd/MediaMTX -> WebRTC -> viewer
+camera -> vendor event API -> optional adapter -> generic events -> cribd
 ```
 
-The event path is optional. Live video and audio must work without an adapter and must continue working if an adapter fails.
-
-## Responsibilities
-
-### cribd core
-
-- Configure the camera's RTSP source.
-- Use MediaMTX to route RTSP media to WebRTC.
-- Serve the viewer.
-- Report camera, stream, and server health.
-- Reconnect after stream interruptions.
-- Accept and forward generic events when an adapter is configured.
-
-MediaMTX handles RTSP, RTP, WebRTC, and ICE. Depending on configuration, the media packets between the camera and server may travel over UDP or TCP.
-
-### Optional hardware adapter
-
-An adapter owns everything specific to a camera or vendor:
-
-- authentication and connection to the hardware event API;
-- event subscription and reconnection;
-- capability discovery, such as `motion` or `crying`; and
-- translation into a generic event format.
-
-For example:
-
-```json
-{
-  "type": "crying",
-  "active": true,
-  "source": "reolink",
-  "timestamp": "2026-08-13T23:00:00Z"
-}
-```
-
-The core does not know how Reolink or another vendor delivers events. With no adapter installed, event features are simply unavailable.
-
-### Viewer
-
-The viewer is a small web/PWA client intended for an always-on iPad, with iPhones as secondary local or remote viewers. It plays WebRTC video and audio, shows connection health, invalidates frozen frames, and displays events when an adapter provides them.
-
-## Interfaces
-
-| Path | Protocol | Purpose |
-| --- | --- | --- |
-| Camera to MediaMTX | RTSP, with RTP over UDP or TCP | Video and audio |
-| MediaMTX to viewer | WebRTC | Low-latency browser playback |
-| Camera to adapter | Vendor-specific | Optional hardware events |
-| Adapter to `cribd` | Internal event interface | Generic capabilities and events |
-| `cribd` to viewer | WebSocket or SSE | Optional event delivery |
-| Remote viewer to server | Tailscale | Private remote access |
-
-## Proposed API
-
-The core API is deliberately small:
-
-```text
-GET  /api/status
-```
-
-When an event adapter is configured, `cribd` may also expose:
-
-```text
-WS   /api/events
-```
-
-Adapter capabilities and health may appear in the status response only when an adapter is present.
-
-## Requirements
-
-- Local viewing must work without public internet access.
-- Camera, stream, and server failures must become obvious within seconds.
-- Frozen frames must not continue looking live.
-- RTSP reconnection must use bounded backoff.
-- The stack must restart automatically after power loss or a process crash.
-- Adapter failures must be reported separately and must not interrupt media.
-- The camera, MediaMTX, and `cribd` must never be exposed directly to the public internet.
-- Remote access must use Tailscale identity and device authorization.
-- Camera credentials must remain on the home server and adapter credentials must remain isolated to their adapter.
-
-## Build sequence
-
-1. Prove phone camera -> RTSP -> MediaMTX on Mac -> browser WebRTC.
-2. Add the `cribd` viewer, status, explicit offline states, and automatic reconnects.
-3. Swap in the production camera and test audio, night vision, and restart recovery.
-4. Move the same stack to a Raspberry Pi and configure automatic startup.
-5. Add Tailscale and test remote viewing over cellular.
-6. Define the generic event interface, then implement Reolink support as a separate adapter.
-
-## Acceptance criteria
+The media path is required and independent of adapters. Adapter failures must never interrupt video or audio.
 
 ### Core
 
-- An iPad reaches live video and audio in one action.
-- End-to-end latency feels live.
-- An internet outage does not interrupt local viewing.
-- The system recovers automatically after the camera or server is power-cycled.
-- A dead camera, stream, or server is unmistakably visible within seconds.
-- An authorized iPhone can view through Tailscale without public port forwarding.
-- The system works with a plain RTSP camera that provides no event API.
+- Configure the camera as MediaMTX path `/crib`.
+- Route RTSP media to WebRTC and reconnect after interruptions.
+- Report camera, stream, and server health.
+- Accept generic events when an adapter is configured.
 
-### Optional adapters
+### Optional hardware adapter
 
-- `cribd` reports the adapter's capabilities and health.
-- Generic events reach connected viewers with negligible application delay.
-- Disabling or crashing the adapter does not interrupt video or audio.
-- Vendor-specific protocols do not leak into the media core.
+- Authenticate with the camera's event API.
+- Subscribe and reconnect independently of the media path.
+- Discover capabilities such as motion or crying.
+- Translate vendor data into generic events.
 
-## Initial target
+The core does not know how Reolink or another vendor delivers events. Without an adapter, event features are unavailable.
 
-- **Camera:** Reolink E1 Pro or another compatible RTSP camera
-- **Development server:** Apple-silicon Mac
-- **Production server:** Raspberry Pi 5
-- **Viewer:** iPad and iPhones
-- **Media engine:** MediaMTX
-- **Remote network:** Tailscale
-- **First optional adapter:** Reolink
+## Constraints
 
-## Open questions
+- Local viewing must work without public internet access.
+- Stream failures and frozen frames must become obvious within seconds.
+- The stack must recover after camera, process, or power interruptions.
+- Camera and adapter credentials remain on the home server.
+- Nothing is exposed directly to the public internet.
+- Remote access will use Tailscale identity and device authorization.
 
-- Should adapters run in-process, as plugins, or as isolated sidecars?
-- What is the smallest useful generic event envelope?
-- How should adapters advertise capabilities and health?
-- Should live events use WebSocket or server-sent events?
-- Will background events eventually require a native iOS/iPadOS viewer?
+## Roadmap
+
+1. Prove RTSP to MediaMTX to browser WebRTC on a Mac.
+2. Add the viewer, health reporting, and explicit offline states.
+3. Test a dedicated camera, night vision, audio, and restart recovery.
+4. Move the stack to a Raspberry Pi and add automatic startup.
+5. Add Tailscale, define the event interface, and build a Reolink adapter.
 
 ## License
 
