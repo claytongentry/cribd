@@ -12,6 +12,7 @@ command -v container >/dev/null 2>&1 ||
   error "Apple's container CLI is required. Install container 1.0 or later."
 
 project_dir=$(CDPATH= cd -- "${0%/*}/.." && pwd)
+host=${CRIBD_HOST:-127.0.0.1}
 
 if [ "${CRIBD_RTSP_URL+x}" != x ] && [ -f "$project_dir/.env" ]; then
   . "$project_dir/.env"
@@ -23,13 +24,13 @@ case "${CRIBD_RTSP_URL-}" in
   *) error "CRIBD_RTSP_URL must use rtsp:// or rtsps://." ;;
 esac
 
-unset CRIBD_RTSP_URL
+unset CRIBD_RTSP_URL CRIBD_HOST
 
 container system start
 
 exec container run --rm --name cribd-media \
   --env "MTX_PATHS_CRIB_SOURCE=$rtsp_url" \
-  --env "MTX_WEBRTCADDITIONALHOSTS=127.0.0.1" \
-  --publish "127.0.0.1:8889:8889/tcp" \
-  --publish "127.0.0.1:8189:8189/udp" \
+  --env "MTX_WEBRTCADDITIONALHOSTS=$host" \
+  --publish "$host:8889:8889/tcp" \
+  --publish "$host:8189:8189/udp" \
   docker.io/bluenviron/mediamtx:1.20.0

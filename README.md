@@ -7,7 +7,7 @@
 
 ## Status
 
-The current prototype runs on an Apple silicon Mac, serves one loopback-only stream, and uses MediaMTX's built-in viewer. Custom viewers, event adapters, remote access, persistence, and Raspberry Pi deployment come later.
+The current prototype runs on an Apple silicon Mac, serves one stream through MediaMTX's built-in viewer, and is loopback-only by default. It can also serve devices on the same local network. Custom viewers, event adapters, remote access, persistence, and Raspberry Pi deployment come later.
 
 ## Run locally
 
@@ -21,7 +21,15 @@ cp .env.example .env
 
 Open `http://localhost:8889/crib`. Use H.264 video with Opus, G722, PCMA, or PCMU audio for WebRTC playback.
 
-The launcher runs MediaMTX 1.20.0 and binds its WebRTC ports to loopback. Docker and Docker Compose are not required; `docker.io` is only the OCI image registry.
+To view from another device, use the Mac's LAN IPv4 address—not the camera's:
+
+```sh
+CRIBD_HOST=192.168.1.10 ./bin/cribd
+```
+
+Then open `http://192.168.1.10:8889/crib` from a device on the same network.
+
+The launcher runs MediaMTX 1.20.0 and binds its WebRTC ports to the selected address. Docker and Docker Compose are not required; `docker.io` is only the OCI image registry.
 
 ## Architecture
 
