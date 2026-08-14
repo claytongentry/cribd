@@ -1,0 +1,24 @@
+#!/bin/sh
+
+set -eu
+
+: "${CRIBD_RTSP_URL:?CRIBD_RTSP_URL is required}"
+: "${RTSP_PORT:?RTSP_PORT is required}"
+: "${MTX_PATH:?MTX_PATH is required}"
+
+exec ffmpeg \
+  -nostdin \
+  -hide_banner \
+  -loglevel quiet \
+  -rtsp_transport tcp \
+  -rw_timeout 5000000 \
+  -i "$CRIBD_RTSP_URL" \
+  -map 0:v:0 \
+  -map 0:a:0 \
+  -c:v copy \
+  -c:a libopus \
+  -ar 48000 \
+  -b:a 96k \
+  -f rtsp \
+  -rtsp_transport tcp \
+  "rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"

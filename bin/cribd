@@ -18,9 +18,15 @@ viewer_name=cribd-viewer
 started=
 log_pid=
 
-if [ "${CRIBD_RTSP_URL+x}" != x ] && [ -f "$project_dir/.env" ]; then
+# Prefix exported overrides so empty values still take precedence.
+rtsp_override=${CRIBD_RTSP_URL+x}${CRIBD_RTSP_URL-}
+adapter_override=${CRIBD_ADAPTER+x}${CRIBD_ADAPTER-}
+
+if [ -f "$project_dir/.env" ]; then
   . "$project_dir/.env"
 fi
+[ -z "$rtsp_override" ] || CRIBD_RTSP_URL=${rtsp_override#x}
+[ -z "$adapter_override" ] || CRIBD_ADAPTER=${adapter_override#x}
 
 case "${CRIBD_RTSP_URL-}" in
   rtsp://* | rtsps://*) rtsp_url=$CRIBD_RTSP_URL ;;
@@ -28,7 +34,23 @@ case "${CRIBD_RTSP_URL-}" in
   *) error "CRIBD_RTSP_URL must use rtsp:// or rtsps://." ;;
 esac
 
-unset CRIBD_RTSP_URL CRIBD_HOST
+adapter=${CRIBD_ADAPTER:-direct}
+case "$adapter" in
+  direct)
+    media_image=docker.io/bluenviron/mediamtx:1.20.0
+    MTX_PATHS_CRIB_SOURCE=$rtsp_url
+    ;;
+  reolink)
+    media_image=docker.io/bluenviron/mediamtx:1.20.0-ffmpeg
+    MTX_PATHS_CRIB_SOURCE=publisher
+    [ -x "$project_dir/adapters/reolink/stream" ] ||
+      error "Reolink adapter is missing or not executable."
+    ;;
+  *) error "CRIBD_ADAPTER must be 'direct' or 'reolink'." ;;
+esac
+
+unset CRIBD_RTSP_URL CRIBD_ADAPTER CRIBD_HOST \
+  rtsp_override adapter_override
 
 container system start
 
@@ -65,13 +87,27 @@ trap 'exit 129' 1
 trap 'exit 130' 2
 trap 'exit 143' 15
 
-container run --detach --rm --name "$media_name" \
-  --env "MTX_PATHS_CRIB_SOURCE=$rtsp_url" \
+export MTX_PATHS_CRIB_SOURCE
+
+set -- --detach --rm --name "$media_name" \
+  --env MTX_PATHS_CRIB_SOURCE \
   --env "MTX_WEBRTCADDITIONALHOSTS=$host" \
   --publish "$host:8890:8889/tcp" \
-  --publish "$host:8189:8189/udp" \
-  docker.io/bluenviron/mediamtx:1.20.0 >/dev/null
+  --publish "$host:8189:8189/udp"
+
+if [ "$adapter" = reolink ]; then
+  CRIBD_RTSP_URL=$rtsp_url
+  export CRIBD_RTSP_URL
+  set -- "$@" \
+    --env CRIBD_RTSP_URL \
+    --env MTX_PATHS_CRIB_RUNONINIT=/adapter/stream \
+    --env MTX_PATHS_CRIB_RUNONINITRESTART=true \
+    --mount "type=bind,source=$project_dir/adapters/reolink,target=/adapter,readonly"
+fi
+
+container run "$@" "$media_image" >/dev/null
 started=$media_name
+unset CRIBD_RTSP_URL MTX_PATHS_CRIB_SOURCE rtsp_url
 
 container run --detach --rm --read-only --name "$viewer_name" \
   --mount "type=bind,source=$project_dir/web,target=/www,readonly" \
