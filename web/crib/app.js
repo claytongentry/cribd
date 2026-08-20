@@ -1,22 +1,27 @@
-"use strict";
+import { SoundMeter } from "./sound-meter.js?v=20260818";
 
-const mediaPort = "8890";
-const retryDelay = 1000;
-const freezeAfter = 5000;
-const watchdogEvery = 1000;
+const MEDIA_PORT = "8890";
+const RETRY_DELAY_MS = 1000;
+const FREEZE_TIMEOUT_MS = 5000;
+const WATCHDOG_INTERVAL_MS = 1000;
+const THEME_COOKIE = "cribd_theme";
 
+const root = document.documentElement;
+const body = document.body;
 const video = document.getElementById("video");
-const statusLabel = document.getElementById("status-label");
-const stateTitle = document.getElementById("state-title");
-const stateDetail = document.getElementById("state-detail");
+const statusElement = document.getElementById("status-label");
+const themeToggle = document.getElementById("theme-toggle");
+const themeColor = document.getElementById("theme-color");
+const soundMeter = new SoundMeter(document.getElementById("sound-meter"));
 
-const stateCopy = {
-  connecting: ["Connecting", "Waiting for the camera stream"],
-  offline: ["Camera offline", "Retrying automatically…"],
+const STATUS_LABELS = {
+  connecting: "Connecting",
+  live: "Live",
+  offline: "Offline",
 };
 
 const mediaBase = new URL(window.location.href);
-mediaBase.port = mediaPort;
+mediaBase.port = MEDIA_PORT;
 mediaBase.pathname = "/crib/";
 mediaBase.search = "";
 mediaBase.hash = "";
@@ -27,17 +32,34 @@ let frameCallback = null;
 let lastFrameAt = 0;
 let stopped = false;
 
-function setState(next) {
-  const copy = stateCopy[next];
-  document.body.dataset.state = next;
-  video.controls = next === "live";
-  statusLabel.textContent = next;
-  if (copy) {
-    [stateTitle.textContent, stateDetail.textContent] = copy;
-  }
+function applyTheme(theme) {
+  root.dataset.theme = theme;
+  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  themeColor.content = getComputedStyle(root)
+    .getPropertyValue("--canvas")
+    .trim();
 }
 
-function clearVideo() {
+function toggleTheme() {
+  const theme = root.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(theme);
+  document.cookie = `${THEME_COOKIE}=${theme}; Max-Age=31536000; Path=/; SameSite=Lax`;
+}
+
+function setViewerState(state) {
+  const live = state === "live";
+
+  body.dataset.state = state;
+  video.controls = live;
+  soundMeter.setLive(live);
+  statusElement.textContent = STATUS_LABELS[state];
+}
+
+function disconnect() {
+  const activeReader = reader;
+  reader = null;
+  activeReader?.close();
+  soundMeter.stop();
   video.pause();
   video.srcObject = null;
 }
@@ -48,12 +70,10 @@ function scheduleReconnect(reason) {
   }
 
   console.warn(`[cribd] ${reason}`);
-  reader?.close();
-  reader = null;
-  clearVideo();
-  setState("offline");
+  disconnect();
+  setViewerState("offline");
   clearTimeout(reconnectTimer);
-  reconnectTimer = window.setTimeout(connect, retryDelay);
+  reconnectTimer = window.setTimeout(connect, RETRY_DELAY_MS);
 }
 
 function loadReader() {
@@ -88,19 +108,27 @@ async function connect() {
       return;
     }
 
-    reader = new window.MediaMTXWebRTCReader({
+    let nextReader;
+    nextReader = new window.MediaMTXWebRTCReader({
       url: new URL("whep", mediaBase).toString(),
-      onError: scheduleReconnect,
+      onError: (reason) => {
+        if (reader === nextReader) {
+          scheduleReconnect(reason);
+        }
+      },
       onTrack: (event) => {
-        if (stopped || event.streams.length === 0) {
+        if (stopped || reader !== nextReader || event.streams.length === 0) {
           return;
         }
 
-        video.srcObject = event.streams[0];
+        const [stream] = event.streams;
+        video.srcObject = stream;
+        soundMeter.start(event.receiver, event.track);
         lastFrameAt = performance.now();
         video.play().catch(() => undefined);
       },
     });
+    reader = nextReader;
   } catch (error) {
     scheduleReconnect(error);
   }
@@ -111,8 +139,8 @@ function markFrame() {
     return;
   }
   lastFrameAt = performance.now();
-  if (document.body.dataset.state !== "live") {
-    setState("live");
+  if (body.dataset.state !== "live") {
+    setViewerState("live");
   }
 }
 
@@ -132,28 +160,26 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-const watchdog = window.setInterval(() => {
-  if (
-    !document.hidden &&
-    video.srcObject !== null &&
-    !video.paused &&
-    performance.now() - lastFrameAt >= freezeAfter
-  ) {
+const freezeWatchdog = window.setInterval(() => {
+  const frozen = performance.now() - lastFrameAt >= FREEZE_TIMEOUT_MS;
+  if (!document.hidden && video.srcObject !== null && !video.paused && frozen) {
     scheduleReconnect("video stopped producing frames");
   }
-}, watchdogEvery);
+}, WATCHDOG_INTERVAL_MS);
 
 window.addEventListener("beforeunload", () => {
   stopped = true;
   clearTimeout(reconnectTimer);
-  clearInterval(watchdog);
+  clearInterval(freezeWatchdog);
   if (
     frameCallback !== null &&
     typeof video.cancelVideoFrameCallback === "function"
   ) {
     video.cancelVideoFrameCallback(frameCallback);
   }
-  reader?.close();
+  disconnect();
 });
 
+applyTheme(root.dataset.theme);
+themeToggle.addEventListener("click", toggleTheme);
 connect();
