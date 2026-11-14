@@ -21,4 +21,5 @@ exec ffmpeg \
   -b:a 96k \
   -f rtsp \
   -rtsp_transport tcp \
+  -pkt_size 1440 \
   "rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
